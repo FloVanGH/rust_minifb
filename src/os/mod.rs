@@ -10,5 +10,7 @@ pub mod redox;
     target_os = "openbsd"
 ))]
 pub mod unix;
+#[cfg(feature = "utouch")]
+pub mod utouch;
 #[cfg(target_os = "windows")]
 pub mod windows;
