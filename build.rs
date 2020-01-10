@@ -37,6 +37,7 @@ fn main() {
             .opt_level(3) // always build with opts for scaler so it's fast in debug also
             .compile("libscalar.a")
     } else if cfg!(feature = "utouch") {
+        // todo move to fn
         let qt_include_path = qmake_query("QT_INSTALL_HEADERS");
         let qt_library_path = qmake_query("QT_INSTALL_LIBS");
         cpp_build::Config::new()

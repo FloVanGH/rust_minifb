@@ -1,7 +1,6 @@
 #![cfg(feature = "utouch")]
 
-use qt_core::*;
-use qt_widgets::*;
+
 
 use crate::buffer_helper;
 use crate::error::Error;
@@ -39,7 +38,7 @@ pub struct Window {
 impl Window {
     pub fn new(name: &str, width: usize, height: usize, opts: WindowOptions) -> Result<Window> {
         let qt_handle =
-            thread::spawn(move || QApplication::init(|_| unsafe { QApplication::exec() }));
+            thread::spawn(move || );
 
         let window = Window {
             is_open: true,

@@ -11,5 +11,8 @@ cstr = "0.1.0"
 cpp = "0.4"
 minifb = { git = "https://github.com/FloVanGH/rust_minifb.git", branch = "utouch" }
 
+[features]
+default = ["minifb/utouch"]
+
 # [build-dependencies]
 # cpp_build = "0.4"
