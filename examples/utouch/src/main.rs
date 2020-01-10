@@ -1,38 +1,33 @@
-// #[macro_use]
-// extern crate cstr;
-// #[macro_use]
-// extern crate cpp;
-// #[macro_use]
-// extern crate qmetaobject;
+use minifb::{Key, MouseButton, MouseMode, Scale, Window, WindowOptions};
 
-// use qmetaobject::*;
-
-// mod qrc;
-
-// #[derive(QObject,Default)]
-// struct Greeter {
-//     base : qt_base_class!(trait QObject),
-//     name : qt_property!(QString; NOTIFY name_changed),
-//     name_changed : qt_signal!(),
-//     compute_greetings : qt_method!(fn compute_greetings(&self, verb : String) -> QString {
-//         return (verb + " " + &self.name.to_string()).into()
-//     })
-// }
+const WIDTH: usize = 640;
+const HEIGHT: usize = 360;
 
 fn main() {
-    // unsafe {
-    //     cpp! { {
-    //         #include <QtCore/QCoreApplication>
-    //         #include <QtCore/QString>
-    //     }}
-    //     cpp!{[]{
-    //         QCoreApplication::setApplicationName(QStringLiteral("utouch.minifb"));
-    //     }}
-    // }
-    // QQuickStyle::set_style("Suru");
-    // qrc::load();
-    // qml_register_type::<Greeter>(cstr!("Greeter"), 1, 0, cstr!("Greeter"));
-    // let mut engine = QmlEngine::new();
-    // engine.load_file("qrc:/qml/Main.qml".into());
-    // engine.exec();
+    let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
+
+    let mut window = match Window::new(
+        "Mouse Draw - Press ESC to exit",
+        WIDTH,
+        HEIGHT,
+        WindowOptions {
+            scale: Scale::X2,
+            ..WindowOptions::default()
+        },
+    ) {
+        Ok(win) => win,
+        Err(err) => {
+            println!("Unable to create window {}", err);
+            return;
+        }
+    };
+
+    let (mut width, mut height) = (WIDTH, HEIGHT);
+
+    while window.is_open() && !window.is_key_down(Key::Escape) {
+        // We unwrap here as we want this code to exit if it fails
+        window
+            .update_with_buffer(&buffer, width / 2, height / 2)
+            .unwrap();
+    }
 }
