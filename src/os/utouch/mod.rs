@@ -20,7 +20,7 @@ use std::cmp;
 use std::os::raw;
 use std::thread;
 
-mod qrc;
+// mod qrc;
 
 pub struct Window {
     is_open: bool,
@@ -52,10 +52,29 @@ impl Window {
                 }}
             }
             QQuickStyle::set_style("Suru");
-            qrc::load();
-            qml_register_type::<Greeter>(cstr!("Greeter"), 1, 0, cstr!("Greeter"));
+            // qrc::load();
+            // qml_register_type::<Greeter>(cstr!("Greeter"), 1, 0, cstr!("Greeter"));
             let mut engine = QmlEngine::new();
-            engine.load_file("qrc:/qml/Main.qml".into());
+            // engine.load_file("qrc:/qml/Main.qml".into());
+            engine.load_data(
+                r#"
+            import QtQuick 2.6;
+            import QtQuick.Window 2.0;
+            import Greeter 1.0  // import our Rust classes
+            Window {
+                visible: true;
+                Greeter { //  Instentiate the rust struct
+                    id: greeter;
+                    name: 'World'; // set a property
+                }
+                Text {
+                    anchors.centerIn: parent;
+                    // Call a method
+                    text: greeter.compute_greetings('hello');
+                }
+            }"#
+                .into(),
+            );
             engine.exec();
         });
 
