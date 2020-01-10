@@ -1,6 +1,6 @@
 qrc!(qml_resources,
     "/" {
-        "src/utouch/qml/Main.qml"
+        "src/os/utouch/qml/Main.qml"
     },
 );
 
