@@ -9,6 +9,7 @@ pub mod redox;
     target_os = "netbsd",
     target_os = "openbsd"
 ))]
+#[cfg(not(feature = "utouch"))]
 pub mod unix;
 #[cfg(feature = "utouch")]
 pub mod utouch;
