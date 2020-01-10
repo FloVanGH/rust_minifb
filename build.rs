@@ -25,7 +25,7 @@ fn utouch() {
     let qt_library_path = qmake_query("QT_INSTALL_LIBS");
     cpp_build::Config::new()
         .include(qt_include_path.trim())
-        .build("src/main.rs");
+        .build("src/os/utouch/mod.rs");
 
     let macos_lib_search = if cfg!(target_os = "macos") {
         "=framework"
@@ -67,7 +67,7 @@ fn utouch() {
 fn main() {
     #[cfg(feature = "utouch")]
     utouch();
-    
+
     let env = env::var("TARGET").unwrap();
     if env.contains("darwin") {
         cc::Build::new()
