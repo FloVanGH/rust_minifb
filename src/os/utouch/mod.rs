@@ -42,37 +42,25 @@ pub struct Window {
 impl Window {
     pub fn new(name: &str, width: usize, height: usize, opts: WindowOptions) -> Result<Window> {
         let qt_handle = thread::spawn(move || {
-            unsafe {
-                cpp! { {
-                    #include <QtCore/QCoreApplication>
-                    #include <QtCore/QString>
-                }}
-                cpp! {[]{
-                    QCoreApplication::setApplicationName(QStringLiteral("utouch.minifb"));
-                }}
-            }
-            QQuickStyle::set_style("Suru");
-            // qrc::load();
+            // Register the `Greeter` struct to QML
             // qml_register_type::<Greeter>(cstr!("Greeter"), 1, 0, cstr!("Greeter"));
+            // Create a QML engine from rust
             let mut engine = QmlEngine::new();
-            // engine.load_file("qrc:/qml/Main.qml".into());
+            // (Here the QML code is inline, but one can also load from a file)
             engine.load_data(
                 r#"
-            import QtQuick 2.6;
-            import QtQuick.Window 2.0;
-            import Greeter 1.0  // import our Rust classes
-            Window {
-                visible: true;
-                Greeter { //  Instentiate the rust struct
-                    id: greeter;
-                    name: 'World'; // set a property
-                }
-                Text {
-                    anchors.centerIn: parent;
-                    // Call a method
-                    text: greeter.compute_greetings('hello');
-                }
-            }"#
+        import QtQuick 2.6;
+        import QtQuick.Window 2.0;
+        import Greeter 1.0  // import our Rust classes
+        Window {
+            visible: true;
+          
+            Text {
+                anchors.centerIn: parent;
+                // Call a method
+                text: greeter.compute_greetings('hello');
+            }
+        }"#
                 .into(),
             );
             engine.exec();
