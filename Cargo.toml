@@ -24,7 +24,7 @@ png = "0.15"
 
 [build-dependencies]
 cc = "1.0"
-cpp_build = "0.5.4"
+cpp_build = { version = "0.5.4", optional = true }
 
 [dependencies]
 cast = "0.2"
@@ -67,4 +67,4 @@ x11-dl = "2.18.3"
 orbclient = "0.3.20"
 
 [features]
-utouch = ["qt_core", "qt_widgets"]
+utouch = ["qt_core", "qt_widgets", "cpp_build"]

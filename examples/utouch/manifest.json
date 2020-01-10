@@ -1,0 +1,15 @@
+{
+    "name": "utouch.minifb",
+    "description": "Minifb utouch example.",
+    "architecture": "@CLICK_ARCH@",
+    "title": "utouch",
+    "hooks": {
+        "utouch": {
+            "apparmor": "utouch.apparmor",
+            "desktop":  "utouch.desktop"
+        }
+    },
+    "version": "0.1.0",
+    "maintainer": "Florian Blasius <flovanpt@posteo.de>",
+    "framework" : "ubuntu-sdk-16.04"
+}

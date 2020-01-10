@@ -1,0 +1,15 @@
+[package]
+name = "utouch"
+version = "0.1.0"
+authors = ["Florian Blasius <flovanpt@posteo.de"]
+edition = "2018"
+# build = "src/build.rs"
+
+[dependencies]
+qmetaobject = "0.1.4"
+cstr = "0.1.0"
+cpp = "0.4"
+minifb = { git = "https://github.com/FloVanGH/rust_minifb.git", branch = "utouch" }
+
+# [build-dependencies]
+# cpp_build = "0.4"

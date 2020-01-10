@@ -27,8 +27,6 @@ fn main() {
     let (mut width, mut height) = (WIDTH, HEIGHT);
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
-      
-
         // We unwrap here as we want this code to exit if it fails
         window
             .update_with_buffer(&buffer, width / 2, height / 2)

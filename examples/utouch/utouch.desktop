@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=utouch
+Exec=utouch %U
+Icon=assets/logo.svg
+Terminal=false
+Type=Application
+X-Ubuntu-Touch=true
