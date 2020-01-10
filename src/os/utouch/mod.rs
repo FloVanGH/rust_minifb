@@ -1,6 +1,7 @@
 #![cfg(feature = "utouch")]
 
 use cpp;
+use cstr;
 use qmetaobject::*;
 
 use crate::buffer_helper;
