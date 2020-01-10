@@ -38,7 +38,7 @@ pub struct Window {
 impl Window {
     pub fn new(name: &str, width: usize, height: usize, opts: WindowOptions) -> Result<Window> {
         let qt_handle =
-            thread::spawn(move || );
+            thread::spawn(move || println!("Test"));
 
         let window = Window {
             is_open: true,

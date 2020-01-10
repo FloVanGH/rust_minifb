@@ -119,7 +119,8 @@ use self::os::redox as imp;
     target_os = "freebsd",
     target_os = "dragonfly",
     target_os = "netbsd",
-    target_os = "openbsd"
+    target_os = "openbsd",
+    not(feature = "utouch")
 ))]
 use self::os::unix as imp;
 #[cfg(feature = "utouch")]

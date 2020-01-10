@@ -19,6 +19,51 @@ fn qmake_query(var: &str) -> String {
     .expect("UTF-8 conversion failed")
 }
 
+#[cfg(feature = "utouch")]
+fn utouch() {
+    let qt_include_path = qmake_query("QT_INSTALL_HEADERS");
+    let qt_library_path = qmake_query("QT_INSTALL_LIBS");
+    cpp_build::Config::new()
+        .include(qt_include_path.trim())
+        .build("src/main.rs");
+
+    let macos_lib_search = if cfg!(target_os = "macos") {
+        "=framework"
+    } else {
+        ""
+    };
+    let macos_lib_framework = if cfg!(target_os = "macos") { "" } else { "5" };
+    println!(
+        "cargo:rustc-link-search{}={}",
+        macos_lib_search,
+        qt_library_path.trim()
+    );
+    println!(
+        "cargo:rustc-link-lib{}=Qt{}Widgets",
+        macos_lib_search, macos_lib_framework
+    );
+    println!(
+        "cargo:rustc-link-lib{}=Qt{}Gui",
+        macos_lib_search, macos_lib_framework
+    );
+    println!(
+        "cargo:rustc-link-lib{}=Qt{}Core",
+        macos_lib_search, macos_lib_framework
+    );
+    println!(
+        "cargo:rustc-link-lib{}=Qt{}Quick",
+        macos_lib_search, macos_lib_framework
+    );
+    println!(
+        "cargo:rustc-link-lib{}=Qt{}Qml",
+        macos_lib_search, macos_lib_framework
+    );
+    println!(
+        "cargo:rustc-link-lib{}=Qt{}QuickControls2",
+        macos_lib_search, macos_lib_framework
+    );
+}
+
 fn main() {
     let env = env::var("TARGET").unwrap();
     if env.contains("darwin") {
@@ -37,47 +82,7 @@ fn main() {
             .opt_level(3) // always build with opts for scaler so it's fast in debug also
             .compile("libscalar.a")
     } else if cfg!(feature = "utouch") {
-        // todo move to fn
-        let qt_include_path = qmake_query("QT_INSTALL_HEADERS");
-        let qt_library_path = qmake_query("QT_INSTALL_LIBS");
-        cpp_build::Config::new()
-            .include(qt_include_path.trim())
-            .build("src/main.rs");
-
-        let macos_lib_search = if cfg!(target_os = "macos") {
-            "=framework"
-        } else {
-            ""
-        };
-        let macos_lib_framework = if cfg!(target_os = "macos") { "" } else { "5" };
-        println!(
-            "cargo:rustc-link-search{}={}",
-            macos_lib_search,
-            qt_library_path.trim()
-        );
-        println!(
-            "cargo:rustc-link-lib{}=Qt{}Widgets",
-            macos_lib_search, macos_lib_framework
-        );
-        println!(
-            "cargo:rustc-link-lib{}=Qt{}Gui",
-            macos_lib_search, macos_lib_framework
-        );
-        println!(
-            "cargo:rustc-link-lib{}=Qt{}Core",
-            macos_lib_search, macos_lib_framework
-        );
-        println!(
-            "cargo:rustc-link-lib{}=Qt{}Quick",
-            macos_lib_search, macos_lib_framework
-        );
-        println!(
-            "cargo:rustc-link-lib{}=Qt{}Qml",
-            macos_lib_search, macos_lib_framework
-        );
-        println!(
-            "cargo:rustc-link-lib{}=Qt{}QuickControls2",
-            macos_lib_search, macos_lib_framework
-        );
+        #[cfg(feature = "utouch")]
+        utouch();
     }
 }
