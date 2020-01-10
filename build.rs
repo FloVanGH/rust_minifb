@@ -65,6 +65,9 @@ fn utouch() {
 }
 
 fn main() {
+    #[cfg(feature = "utouch")]
+    utouch();
+    
     let env = env::var("TARGET").unwrap();
     if env.contains("darwin") {
         cc::Build::new()
@@ -81,8 +84,5 @@ fn main() {
             .file("src/native/unix/scalar.cpp")
             .opt_level(3) // always build with opts for scaler so it's fast in debug also
             .compile("libscalar.a")
-    } else if cfg!(feature = "utouch") {
-        #[cfg(feature = "utouch")]
-        utouch();
     }
 }
