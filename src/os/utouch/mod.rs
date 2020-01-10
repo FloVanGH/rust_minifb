@@ -57,7 +57,7 @@ impl Window {
             Text {
                 anchors.centerIn: parent;
                 // Call a method
-                text: greeter.compute_greetings('hello');
+                text: "Hello from minifb"
             }
         }"#
                 .into(),
