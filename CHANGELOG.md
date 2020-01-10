@@ -2,6 +2,35 @@
 
 This project follows semantic versioning.
 
+### v0.15.1 (2019-12-27)
+
+- [fixed] Fixed access to raw_window_handle()
+
+### v0.15 (2019-12-16)
+
+- [API BREAKAGE] - `update_with_buffer` now always take width and height parameters.
+- [added] scale_mode in WindowOptions now allow for aspect correct scaling, center of non-scaled buffers and more.
+- [added] Added `limit_update_rate(..)` in order to reduce CPU usage and not hammer the native system calls.
+- [changed] x11 now uses C for it's scaling in software mode in order to always have opts on even in debug build.
+- [changed] Several fixes with rescaling on all platforms
+- [changed] on x11 some window mangers will resize a non-resizable windows and minifb handles this now correctly.
+- [fixed] Cursor was behaving bad on Windows. This has now been fixed
+- [known issues] There are some flickering and various issues when resizing on most platforms. PRs/ideas welcome for this.
+
+### v0.14 (2019-12-03)
+
+- [changed] Deprecated update_with_buffer on favor of update_with_buffer_size. The idea is that a size in of the buffer will be more robust and allow for aspect scaling as well.
+- [changed] Improved macOS resizing support.
+- [changed] Better modifier handling on macOS.
+- [changed] Moved CI over to Github Actions
+- [changed] Formatted all code with rustfmt
+- [changed] Documentation improvments (Thanks Gary Guo & Arif Roktim!)
+- [fixed] 'attempt to subtract with overflow' bug (Thanks Venceslas!)
+- [fixed] Window close handling & missing Alt keys for X11 (Thanks Gary Guo!)
+- [added] Juila example added (Thanks mishazawa!)
+- [added] Add support for raspberry pi (Thanks Florian Blasius!)
+- [added] Added support for raw-window-handle trait
+
 ### v0.13 (2019-08-30)
 
 - [changed] unix: replaced scale functions with macro and added missing invocations (Thanks Johannes Stölp!)
