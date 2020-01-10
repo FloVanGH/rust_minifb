@@ -36,12 +36,12 @@ pub struct Window {
     key_handler: KeyHandler,
     menu_counter: MenuHandle,
     menus: Vec<UnixMenu>,
-    qt_handle: thread::JoinHandle<()>,
+    // qt_handle: thread::JoinHandle<()>,
 }
 
 impl Window {
     pub fn new(name: &str, width: usize, height: usize, opts: WindowOptions) -> Result<Window> {
-        let qt_handle = thread::spawn(move || {
+        // let qt_handle = thread::spawn(move || {
             // Register the `Greeter` struct to QML
             // qml_register_type::<Greeter>(cstr!("Greeter"), 1, 0, cstr!("Greeter"));
             // Create a QML engine from rust
@@ -64,7 +64,7 @@ impl Window {
                 .into(),
             );
             engine.exec();
-        });
+        // });
 
         let window = Window {
             is_open: true,
@@ -79,7 +79,7 @@ impl Window {
             window_scale: 1,
             menu_counter: MenuHandle(0),
             menus: Vec::new(),
-            qt_handle,
+            // qt_handle,
         };
 
         Ok(window)
