@@ -99,6 +99,7 @@ mod buffer_helper;
 mod key_handler;
 mod mouse_handler;
 mod os;
+#[cfg(not(feature = "utouch"))]
 mod rate;
 mod window_flags;
 //mod menu;
