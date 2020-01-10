@@ -1,9 +1,13 @@
 #![cfg(feature = "utouch")]
 
+use qt_core::*;
+use qt_widgets::*;
+
 use crate::buffer_helper;
 use crate::error::Error;
 use crate::key_handler::KeyHandler;
 use crate::mouse_handler;
+use crate::rate::UpdateRate;
 use crate::InputCallback;
 use crate::Result;
 use crate::{CursorStyle, MouseButton, MouseMode};
@@ -13,6 +17,7 @@ use crate::{Scale, WindowOptions};
 
 use std::cmp;
 use std::os::raw;
+use std::thread;
 
 pub struct Window {
     is_open: bool,
@@ -28,13 +33,35 @@ pub struct Window {
     key_handler: KeyHandler,
     menu_counter: MenuHandle,
     menus: Vec<UnixMenu>,
+    qt_handle: thread::JoinHandle<()>,
 }
 
 impl Window {
     pub fn new(name: &str, width: usize, height: usize, opts: WindowOptions) -> Result<Window> {
-    
+        let qt_handle = thread::spawn(move || {
+            QApplication::init(|_| unsafe {
+   
+                QApplication::exec()
+            })
+        });
 
-        Err(Error::WindowCreate("Unable to open Window".to_owned()))
+        let window = Window {
+            is_open: true,
+            is_active: true,
+            mouse_pos: None,
+            mouse_scroll: None,
+            mouse_state: (false, false, false),
+            key_handler: KeyHandler::new(),
+            update_rate: UpdateRate::new(),
+            buffer_width: width,
+            buffer_height: height,
+            window_scale: 1,
+            menu_counter: MenuHandle(0),
+            menus: Vec::new(),
+            qt_handle,
+        };
+
+        Ok(window)
     }
 
     pub fn set_title(&mut self, title: &str) {}
@@ -43,9 +70,7 @@ impl Window {
         0 as *mut raw::c_void
     }
 
-    pub fn set_background_color(&mut self, color: u32) {
-     
-    }
+    pub fn set_background_color(&mut self, color: u32) {}
 
     pub fn update_with_buffer_stride(
         &mut self,
@@ -54,8 +79,6 @@ impl Window {
         buf_height: usize,
         buf_stride: usize,
     ) -> Result<()> {
-    
-
         Ok(())
     }
 
@@ -124,11 +147,11 @@ impl Window {
     pub fn set_input_callback(&mut self, callback: Box<InputCallback>) {}
 
     pub fn is_open(&self) -> bool {
-        false
+        self.is_open
     }
 
     pub fn is_active(&mut self) -> bool {
-        false
+        self.is_active()
     }
 
     fn process_events(&mut self) {}

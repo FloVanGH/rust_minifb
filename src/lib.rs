@@ -138,6 +138,7 @@ impl fmt::Debug for Window {
     }
 }
 
+#[cfg(not(feature = "utouch"))]
 unsafe impl raw_window_handle::HasRawWindowHandle for Window {
     fn raw_window_handle(&self) -> raw_window_handle::RawWindowHandle {
         self.0.raw_window_handle()
