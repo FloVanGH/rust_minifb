@@ -6,7 +6,7 @@ use crate::buffer_helper;
 use crate::error::Error;
 use crate::key_handler::KeyHandler;
 use crate::mouse_handler;
-use crate::rate::UpdateRate;
+// use crate::rate::UpdateRate;
 use crate::InputCallback;
 use crate::Result;
 use crate::{CursorStyle, MouseButton, MouseMode};
@@ -25,7 +25,7 @@ pub struct Window {
     mouse_scroll: Option<(i32, i32)>,
     /// The state of the left, middle and right mouse buttons
     mouse_state: (bool, bool, bool),
-    update_rate: UpdateRate,
+    // update_rate: UpdateRate,
     buffer_width: usize,
     buffer_height: usize,
     window_scale: usize,
@@ -47,7 +47,7 @@ impl Window {
             mouse_scroll: None,
             mouse_state: (false, false, false),
             key_handler: KeyHandler::new(),
-            update_rate: UpdateRate::new(),
+            // update_rate: UpdateRate::new(),
             buffer_width: width,
             buffer_height: height,
             window_scale: 1,
@@ -107,12 +107,12 @@ impl Window {
 
     #[inline]
     pub fn set_rate(&mut self, rate: Option<std::time::Duration>) {
-        self.update_rate.set_rate(rate);
+        // self.update_rate.set_rate(rate);
     }
 
     #[inline]
     pub fn update_rate(&mut self) {
-        self.update_rate.update();
+        // self.update_rate.update();
     }
 
     pub fn get_keys(&self) -> Option<Vec<Key>> {
