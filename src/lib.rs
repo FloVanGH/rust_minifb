@@ -109,17 +109,18 @@ mod window_flags;
 //pub use menu::MENU_KEY_CTRL;
 //pub use menu::MENU_KEY_ALT;
 
-// todo comment
-// #[cfg(target_os = "macos")]
-// use self::os::macos as imp;
+#[cfg(target_os = "macos")]
+use self::os::macos as imp;
 #[cfg(target_os = "redox")]
 use self::os::redox as imp;
-#[cfg(any(
-    target_os = "linux",
-    target_os = "freebsd",
-    target_os = "dragonfly",
-    target_os = "netbsd",
-    target_os = "openbsd",
+#[cfg(all(
+    any( 
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ),
     not(feature = "utouch")
 ))]
 use self::os::unix as imp;
