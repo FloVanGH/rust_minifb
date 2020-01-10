@@ -88,6 +88,16 @@ pub trait InputCallback {
     fn add_char(&mut self, uni_char: u32);
 }
 
+#[cfg(feature = "utouch")]
+#[macro_use]
+extern crate cstr;
+#[cfg(feature = "utouch")]
+#[macro_use]
+extern crate cpp;
+#[cfg(feature = "utouch")]
+#[macro_use]
+extern crate qmetaobject;
+
 mod error;
 pub use self::error::Error;
 pub type Result<T> = std::result::Result<T, Error>;

@@ -1,6 +1,7 @@
 #![cfg(feature = "utouch")]
 
-
+use cpp;
+use qmetaobject::*;
 
 use crate::buffer_helper;
 use crate::error::Error;
@@ -17,6 +18,8 @@ use crate::{Scale, WindowOptions};
 use std::cmp;
 use std::os::raw;
 use std::thread;
+
+mod qrc;
 
 pub struct Window {
     is_open: bool,
@@ -37,8 +40,23 @@ pub struct Window {
 
 impl Window {
     pub fn new(name: &str, width: usize, height: usize, opts: WindowOptions) -> Result<Window> {
-        let qt_handle =
-            thread::spawn(move || println!("Test"));
+        let qt_handle = thread::spawn(move || {
+            unsafe {
+                cpp! { {
+                    #include <QtCore/QCoreApplication>
+                    #include <QtCore/QString>
+                }}
+                cpp! {[]{
+                    QCoreApplication::setApplicationName(QStringLiteral("utouch.minifb"));
+                }}
+            }
+            QQuickStyle::set_style("Suru");
+            qrc::load();
+            qml_register_type::<Greeter>(cstr!("Greeter"), 1, 0, cstr!("Greeter"));
+            let mut engine = QmlEngine::new();
+            engine.load_file("qrc:/qml/Main.qml".into());
+            engine.exec();
+        });
 
         let window = Window {
             is_open: true,
