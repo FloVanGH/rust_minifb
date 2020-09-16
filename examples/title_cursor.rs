@@ -1,5 +1,3 @@
-extern crate minifb;
-
 use minifb::{CursorStyle, Key, MouseMode, Scale, Window, WindowOptions};
 
 const WIDTH: usize = 640;
@@ -130,6 +128,6 @@ fn main() {
         }
 
         // We unwrap here as we want this code to exit if it fails
-        window.update_with_buffer(&buffer).unwrap();
+        window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
     }
 }

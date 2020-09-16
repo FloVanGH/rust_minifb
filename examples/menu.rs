@@ -1,5 +1,3 @@
-extern crate minifb;
-
 use minifb::MENU_KEY_CTRL;
 use minifb::{InputCallback, Key, Menu, Scale, Window, WindowOptions};
 
@@ -68,7 +66,7 @@ fn main() {
 
     let menu_handle = window.add_menu(&menu);
 
-    window.get_unix_menus().map(|menus| {
+    window.get_posix_menus().map(|menus| {
         println!("Menus {:?}", menus);
     });
 
@@ -113,6 +111,6 @@ fn main() {
         });
 
         // We unwrap here as we want this code to exit if it fails
-        window.update_with_buffer(&buffer).unwrap();
+        window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
     }
 }

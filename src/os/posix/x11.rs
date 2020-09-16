@@ -1,40 +1,87 @@
-#![cfg(any(
-    target_os = "linux",
-    target_os = "freebsd",
-    target_os = "dragonfly",
-    target_os = "netbsd",
-    target_os = "openbsd"
-))]
-// turn off a gazillion warnings about X keysym names
-#![allow(non_upper_case_globals)]
+use crate::key_handler::KeyHandler;
+use crate::rate::UpdateRate;
+use crate::{
+    InputCallback, Key, KeyRepeat, MouseButton, MouseMode, Scale, ScaleMode, WindowOptions,
+};
+use x11_dl::keysym::*;
+use x11_dl::xcursor;
+use x11_dl::xlib;
 
-extern crate cast;
-extern crate x11_dl;
+use crate::error::Error;
+use crate::Result;
+use crate::{CursorStyle, MenuHandle, UnixMenu};
 
-use self::x11_dl::keysym::*;
-use self::x11_dl::xcursor;
-use self::x11_dl::xlib;
-use key_handler::KeyHandler;
-use {InputCallback, Key, KeyRepeat, MouseButton, MouseMode, Scale, WindowOptions};
-
-use error::Error;
-use Result;
-use {CursorStyle, MenuHandle, MenuItem, MenuItemHandle, UnixMenu, UnixMenuItem};
-
+use std::convert::TryFrom;
 use std::ffi::CString;
 use std::mem;
 use std::os::raw;
-use std::os::raw::{c_char, c_uint};
+use std::os::raw::{c_char, c_long, c_uchar, c_uint, c_ulong};
 use std::ptr;
 
-use buffer_helper;
-use mouse_handler;
+use crate::buffer_helper;
+use crate::mouse_handler;
+
+use super::common::Menu;
 
 // NOTE: the x11-dl crate does not define Button6 or Button7
 const Button6: c_uint = xlib::Button5 + 1;
 const Button7: c_uint = xlib::Button5 + 2;
 
-mod key_mapping;
+// These functions are implemented in C in order to always have
+// optimizations on (`-O3`), allowing debug builds to run fast as well.
+extern "C" {
+    fn Image_upper_left(
+        target: *mut u32,
+        source: *const u32,
+        source_w: u32,
+        source_h: u32,
+        source_stride: u32,
+        dest_width: u32,
+        dest_height: u32,
+        bg_color: u32,
+    );
+
+    fn Image_center(
+        target: *mut u32,
+        source: *const u32,
+        source_w: u32,
+        source_h: u32,
+        source_stride: u32,
+        dest_width: u32,
+        dest_height: u32,
+        bg_color: u32,
+    );
+
+    fn Image_resize_linear_aspect_fill_c(
+        target: *mut u32,
+        source: *const u32,
+        source_w: u32,
+        source_h: u32,
+        source_stride: u32,
+        dest_width: u32,
+        dest_height: u32,
+        bg_color: u32,
+    );
+
+    fn Image_resize_linear_c(
+        target: *mut u32,
+        source: *const u32,
+        source_w: u32,
+        source_h: u32,
+        source_stride: u32,
+        dest_width: u32,
+        dest_height: u32,
+    );
+}
+
+#[repr(C)]
+struct MwmHints {
+    flags: c_ulong,
+    functions: c_ulong,
+    decorations: c_ulong,
+    input_mode: c_long,
+    status: c_ulong,
+}
 
 struct DisplayInfo {
     lib: x11_dl::xlib::Xlib,
@@ -53,8 +100,8 @@ struct DisplayInfo {
 }
 
 impl DisplayInfo {
-    fn new() -> Result<DisplayInfo> {
-        let mut display = Self::setup()?;
+    fn new(transparency: bool) -> Result<DisplayInfo> {
+        let mut display = Self::setup(transparency)?;
 
         display.check_formats()?;
         display.check_extensions()?;
@@ -64,7 +111,7 @@ impl DisplayInfo {
         Ok(display)
     }
 
-    fn setup() -> Result<DisplayInfo> {
+    fn setup(transparency: bool) -> Result<DisplayInfo> {
         unsafe {
             let lib = xlib::Xlib::open()
                 .map_err(|e| Error::WindowCreate(format!("failed to load Xlib: {:?}", e)))?;
@@ -78,14 +125,33 @@ impl DisplayInfo {
                 return Err(Error::WindowCreate("XOpenDisplay failed".to_owned()));
             }
 
-            let screen = (lib.XDefaultScreen)(display);
-            let visual = (lib.XDefaultVisual)(display, screen);
-            let gc = (lib.XDefaultGC)(display, screen);
-            let depth = (lib.XDefaultDepth)(display, screen);
+            let screen;
+            let visual;
+            let depth;
 
-            let screen_width = cast::usize((lib.XDisplayWidth)(display, screen))
+            let mut vinfo: xlib::XVisualInfo = std::mem::zeroed();
+            if transparency {
+                (lib.XMatchVisualInfo)(
+                    display,
+                    (lib.XDefaultScreen)(display),
+                    32,
+                    xlib::TrueColor,
+                    &mut vinfo as *mut _,
+                );
+                screen = vinfo.screen;
+                visual = vinfo.visual;
+                depth = vinfo.depth;
+            } else {
+                screen = (lib.XDefaultScreen)(display);
+                visual = (lib.XDefaultVisual)(display, screen);
+                depth = (lib.XDefaultDepth)(display, screen);
+            }
+
+            let gc = (lib.XDefaultGC)(display, screen);
+
+            let screen_width = usize::try_from((lib.XDisplayWidth)(display, screen))
                 .map_err(|e| Error::WindowCreate(format!("illegal width: {}", e)))?;
-            let screen_height = cast::usize((lib.XDisplayHeight)(display, screen))
+            let screen_height = usize::try_from((lib.XDisplayHeight)(display, screen))
                 .map_err(|e| Error::WindowCreate(format!("illegal height: {}", e)))?;
 
             // andrewj: using this instead of XUniqueContext(), as the latter
@@ -227,6 +293,8 @@ pub struct Window {
     height: u32, //
 
     scale: i32,
+    bg_color: u32,
+    scale_mode: ScaleMode,
 
     mouse_x: f32,
     mouse_y: f32,
@@ -234,12 +302,25 @@ pub struct Window {
     scroll_y: f32,
     buttons: [u8; 3],
     prev_cursor: CursorStyle,
+    active: bool,
 
     should_close: bool, // received delete window message from X server
 
     key_handler: KeyHandler,
+    update_rate: UpdateRate,
     menu_counter: MenuHandle,
     menus: Vec<UnixMenu>,
+}
+
+unsafe impl raw_window_handle::HasRawWindowHandle for Window {
+    fn raw_window_handle(&self) -> raw_window_handle::RawWindowHandle {
+        let handle = raw_window_handle::unix::XlibHandle {
+            window: self.handle,
+            display: self.d.display as *mut core::ffi::c_void,
+            ..raw_window_handle::unix::XlibHandle::empty()
+        };
+        raw_window_handle::RawWindowHandle::Xlib(handle)
+    }
 }
 
 impl Window {
@@ -255,7 +336,7 @@ impl Window {
         // FIXME: this DisplayInfo should be a singleton, hence this code
         // is probably no good when using multiple windows.
 
-        let mut d = DisplayInfo::new()?;
+        let mut d = DisplayInfo::new(opts.transparency)?;
 
         let scale =
             Self::get_scale_factor(width, height, d.screen_width, d.screen_height, opts.scale);
@@ -270,6 +351,10 @@ impl Window {
 
             attributes.border_pixel = (d.lib.XBlackPixel)(d.display, d.screen);
             attributes.background_pixel = attributes.border_pixel;
+            if opts.transparency {
+                attributes.colormap =
+                    (d.lib.XCreateColormap)(d.display, root, d.visual, xlib::AllocNone);
+            }
 
             attributes.backing_store = xlib::NotUseful;
 
@@ -295,9 +380,11 @@ impl Window {
                 d.depth,
                 xlib::InputOutput as u32, /* class */
                 d.visual,
-                xlib::CWBackingStore | xlib::CWBackPixel | xlib::CWBorderPixel,
+                xlib::CWColormap | xlib::CWBackingStore | xlib::CWBackPixel | xlib::CWBorderPixel,
                 &mut attributes,
             );
+
+            d.gc = (d.lib.XCreateGC)(d.display, handle, 0, ptr::null_mut());
 
             if handle == 0 {
                 return Err(Error::WindowCreate("Unable to open Window".to_owned()));
@@ -312,7 +399,8 @@ impl Window {
                     | xlib::KeyPressMask
                     | xlib::KeyReleaseMask
                     | xlib::ButtonPressMask
-                    | xlib::ButtonReleaseMask,
+                    | xlib::ButtonReleaseMask
+                    | xlib::FocusChangeMask,
             );
 
             if !opts.resize {
@@ -328,6 +416,28 @@ impl Window {
                     d.display,
                     handle,
                     &mut size_hints as *mut xlib::XSizeHints,
+                );
+            }
+
+            if opts.borderless {
+                let hints_property = (d.lib.XInternAtom)(
+                    d.display,
+                    "_MOTIF_WM_HINTS\0" as *const _ as *const c_char,
+                    0,
+                );
+                assert!(hints_property != 0);
+                let mut hints: MwmHints = std::mem::zeroed();
+                hints.flags = 2;
+                hints.decorations = 0;
+                (d.lib.XChangeProperty)(
+                    d.display,
+                    handle,
+                    hints_property,
+                    hints_property,
+                    32,
+                    xlib::PropModeReplace,
+                    &hints as *const _ as *const c_uchar,
+                    5,
                 );
             }
 
@@ -360,10 +470,14 @@ impl Window {
                 mouse_y: 0.0,
                 scroll_x: 0.0,
                 scroll_y: 0.0,
+                bg_color: 0,
+                scale_mode: opts.scale_mode,
                 buttons: [0, 0, 0],
                 prev_cursor: CursorStyle::Arrow,
                 should_close: false,
+                active: false,
                 key_handler: KeyHandler::new(),
+                update_rate: UpdateRate::new(),
                 menu_counter: MenuHandle(0),
                 menus: Vec::new(),
             })
@@ -379,7 +493,6 @@ impl Window {
         let bytes_per_line = (width as i32) * 4;
 
         draw_buffer.resize(width * height, 0);
-
         let image = (d.lib.XCreateImage)(
             d.display,
             d.visual, /* TODO: this was CopyFromParent in the C code */
@@ -419,15 +532,16 @@ impl Window {
         };
     }
 
-    pub fn update_with_buffer(&mut self, buffer: &[u32]) -> Result<()> {
-        buffer_helper::check_buffer_size(
-            self.width as usize,
-            self.height as usize,
-            self.scale as usize,
-            buffer,
-        )?;
+    pub fn update_with_buffer_stride(
+        &mut self,
+        buffer: &[u32],
+        buf_width: usize,
+        buf_height: usize,
+        buf_stride: usize,
+    ) -> Result<()> {
+        buffer_helper::check_buffer_size(buf_width, buf_height, buf_stride, buffer)?;
 
-        unsafe { self.raw_blit_buffer(buffer) };
+        unsafe { self.raw_blit_buffer(buffer, buf_width, buf_height, buf_stride) };
 
         self.update();
 
@@ -450,6 +564,44 @@ impl Window {
     #[inline]
     pub fn get_window_handle(&self) -> *mut raw::c_void {
         self.handle as *mut raw::c_void
+    }
+
+    #[inline]
+    pub fn set_background_color(&mut self, bg_color: u32) {
+        self.bg_color = bg_color;
+    }
+
+    #[inline]
+    pub fn set_cursor_visibility(&mut self, visibility: bool) {
+        unsafe {
+            if visibility {
+                (self.d.lib.XDefineCursor)(
+                    self.d.display,
+                    self.handle,
+                    self.d.cursors[self.prev_cursor as usize],
+                );
+            } else {
+                static empty: [c_char; 8] = [0; 8];
+                let mut color = std::mem::zeroed();
+                let pixmap = (self.d.lib.XCreateBitmapFromData)(
+                    self.d.display,
+                    self.handle,
+                    empty.as_ptr(),
+                    8,
+                    8,
+                );
+                let cursor = (self.d.lib.XCreatePixmapCursor)(
+                    self.d.display,
+                    pixmap,
+                    pixmap,
+                    &mut color as *mut _,
+                    &mut color as *mut _,
+                    0,
+                    0,
+                );
+                (self.d.lib.XDefineCursor)(self.d.display, self.handle, cursor);
+            }
+        }
     }
 
     #[inline]
@@ -512,6 +664,16 @@ impl Window {
     }
 
     #[inline]
+    pub fn set_rate(&mut self, rate: Option<std::time::Duration>) {
+        self.update_rate.set_rate(rate);
+    }
+
+    #[inline]
+    pub fn update_rate(&mut self) {
+        self.update_rate.update();
+    }
+
+    #[inline]
     pub fn get_keys(&self) -> Option<Vec<Key>> {
         self.key_handler.get_keys()
     }
@@ -519,6 +681,11 @@ impl Window {
     #[inline]
     pub fn get_keys_pressed(&self, repeat: KeyRepeat) -> Option<Vec<Key>> {
         self.key_handler.get_keys_pressed(repeat)
+    }
+
+    #[inline]
+    pub fn get_keys_released(&self) -> Option<Vec<Key>> {
+        self.key_handler.get_keys_released()
     }
 
     #[inline]
@@ -558,8 +725,7 @@ impl Window {
 
     #[inline]
     pub fn is_active(&mut self) -> bool {
-        // TODO: Proper implementation
-        true
+        self.active
     }
 
     fn get_scale_factor(
@@ -613,7 +779,7 @@ impl Window {
         handle
     }
 
-    pub fn get_unix_menus(&self) -> Option<&Vec<UnixMenu>> {
+    pub fn get_posix_menus(&self) -> Option<&Vec<UnixMenu>> {
         Some(&self.menus)
     }
 
@@ -627,37 +793,63 @@ impl Window {
 
     ////////////////////////////////////
 
-    unsafe fn raw_blit_buffer(&mut self, buffer: &[u32]) {
-        match self.scale {
-            1 => {
-                // input buffer may be larger than necessary, so get a slice of correct size
-                let src_buf = &buffer[0..self.draw_buffer.len()];
-
-                self.draw_buffer[..].copy_from_slice(src_buf);
+    unsafe fn raw_blit_buffer(
+        &mut self,
+        buffer: &[u32],
+        buf_width: usize,
+        buf_height: usize,
+        buf_stride: usize,
+    ) {
+        match self.scale_mode {
+            ScaleMode::Stretch => {
+                Image_resize_linear_c(
+                    self.draw_buffer.as_mut_ptr(),
+                    buffer.as_ptr(),
+                    buf_width as u32,
+                    buf_height as u32,
+                    buf_stride as u32,
+                    self.width as u32,
+                    self.height as u32,
+                );
             }
 
-            2 => {
-                self.scale_2x(buffer);
+            ScaleMode::AspectRatioStretch => {
+                Image_resize_linear_aspect_fill_c(
+                    self.draw_buffer.as_mut_ptr(),
+                    buffer.as_ptr(),
+                    buf_width as u32,
+                    buf_height as u32,
+                    buf_stride as u32,
+                    self.width as u32,
+                    self.height as u32,
+                    self.bg_color,
+                );
             }
 
-            4 => {
-                self.scale_4x(buffer);
+            ScaleMode::Center => {
+                Image_center(
+                    self.draw_buffer.as_mut_ptr(),
+                    buffer.as_ptr(),
+                    buf_width as u32,
+                    buf_height as u32,
+                    buf_stride as u32,
+                    self.width as u32,
+                    self.height as u32,
+                    self.bg_color,
+                );
             }
 
-            8 => {
-                self.scale_8x(buffer);
-            }
-
-            16 => {
-                self.scale_16x(buffer);
-            }
-
-            32 => {
-                self.scale_32x(buffer);
-            }
-
-            _ => {
-                panic!("bad scale for raw_blit_buffer()");
+            ScaleMode::UpperLeft => {
+                Image_upper_left(
+                    self.draw_buffer.as_mut_ptr(),
+                    buffer.as_ptr(),
+                    buf_width as u32,
+                    buf_height as u32,
+                    buf_stride as u32,
+                    self.width as u32,
+                    self.height as u32,
+                    self.bg_color,
+                );
             }
         }
 
@@ -759,11 +951,17 @@ impl Window {
                 self.free_image();
                 self.ximage = Self::alloc_image(
                     &self.d,
-                    cast::usize(self.width),
-                    cast::usize(self.height),
+                    self.width as usize,
+                    self.height as usize,
                     &mut self.draw_buffer,
                 )
                 .expect("todo");
+            }
+            xlib::FocusOut => {
+                self.active = false;
+            }
+            xlib::FocusIn => {
+                self.active = true;
             }
 
             _ => {}
@@ -817,15 +1015,17 @@ impl Window {
             return;
         }
 
-        if let Some(code_point) = key_mapping::keysym_to_unicode(sym as u32) {
-            // Taken from GLFW
-            if code_point < 32 || (code_point > 126 && code_point < 160) {
-                return;
-            }
+        let keysym = xkb::Keysym(sym as u32);
+        let code_point = keysym.utf32();
+        // Taken from GLFW
+        if code_point == 0 {
+            return;
+        } else if code_point < 32 || (code_point > 126 && code_point < 160) {
+            return;
+        }
 
-            if let Some(ref mut callback) = self.key_handler.key_callback {
-                callback.add_char(code_point);
-            }
+        if let Some(ref mut callback) = self.key_handler.key_callback {
+            callback.add_char(code_point);
         }
     }
 
@@ -990,35 +1190,6 @@ impl Window {
     }
 }
 
-// macro_rules inside impl {} blocks currently not supported
-// https://github.com/rust-lang/rust/issues/37205
-macro_rules! gen_scale_x(
-    ($($fn_name:ident, $x:expr),+$(,)?) => (
-        impl Window {
-            $(unsafe fn $fn_name(&mut self, buffer :  &[u32]) {
-                let w = self.width as usize;
-
-                let bw = (self.width as usize) / $x;
-                let bh = (self.height as usize) / $x;
-
-                for y in 0..bh {
-                    let src = &buffer[y * bw..y * bw + bw];
-
-                    for dy in 0..$x {
-                        let dest = &mut self.draw_buffer[(y * $x + dy) * w..(y * $x + dy) * w + w];
-
-                        for x in 0..bw {
-                            dest[x * $x .. x * $x + $x].copy_from_slice(&[src[x]; $x]);
-                        }
-                    }
-                }
-            })+
-        }
-    )
-);
-
-gen_scale_x!(scale_2x, 2, scale_4x, 4, scale_8x, 8, scale_16x, 16, scale_32x, 32,);
-
 impl Drop for Window {
     fn drop(&mut self) {
         unsafe {
@@ -1030,61 +1201,5 @@ impl Drop for Window {
 
             (self.d.lib.XDestroyWindow)(self.d.display, self.handle);
         }
-    }
-}
-
-pub struct Menu {
-    pub internal: UnixMenu,
-}
-
-impl Menu {
-    pub fn new(name: &str) -> Result<Menu> {
-        Ok(Menu {
-            internal: UnixMenu {
-                handle: MenuHandle(0),
-                item_counter: MenuItemHandle(0),
-                name: name.to_owned(),
-                items: Vec::new(),
-            },
-        })
-    }
-
-    pub fn add_sub_menu(&mut self, name: &str, sub_menu: &Menu) {
-        let handle = self.next_item_handle();
-        self.internal.items.push(UnixMenuItem {
-            label: name.to_owned(),
-            handle,
-            sub_menu: Some(Box::new(sub_menu.internal.clone())),
-            id: 0,
-            enabled: true,
-            key: Key::Unknown,
-            modifier: 0,
-        });
-    }
-
-    fn next_item_handle(&mut self) -> MenuItemHandle {
-        let handle = self.internal.item_counter;
-        self.internal.item_counter.0 += 1;
-        handle
-    }
-
-    pub fn add_menu_item(&mut self, item: &MenuItem) -> MenuItemHandle {
-        let item_handle = self.next_item_handle();
-        self.internal.items.push(UnixMenuItem {
-            sub_menu: None,
-            handle: self.internal.item_counter,
-            id: item.id,
-            label: item.label.clone(),
-            enabled: item.enabled,
-            key: item.key,
-            modifier: item.modifier,
-        });
-        item_handle
-    }
-
-    pub fn remove_item(&mut self, handle: &MenuItemHandle) {
-        self.internal
-            .items
-            .retain(|ref item| item.handle.0 != handle.0);
     }
 }

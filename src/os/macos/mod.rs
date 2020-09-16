@@ -1,15 +1,16 @@
 #![cfg(target_os = "macos")]
 
-use error::Error;
-use key_handler::KeyHandler;
-use Result;
-use {Key, KeyRepeat, MouseButton, MouseMode, Scale, WindowOptions};
+use crate::error::Error;
+use crate::key_handler::KeyHandler;
+use crate::rate::UpdateRate;
+use crate::Result;
+use crate::{Key, KeyRepeat, MouseButton, MouseMode, Scale, WindowOptions};
 // use MenuItem;
-use buffer_helper;
-use mouse_handler;
-use window_flags;
-use InputCallback;
-use {CursorStyle, MenuHandle, MenuItem, MenuItemHandle};
+use crate::buffer_helper;
+use crate::mouse_handler;
+use crate::window_flags;
+use crate::InputCallback;
+use crate::{CursorStyle, MenuHandle, MenuItem, MenuItemHandle};
 // use menu::Menu;
 
 use std::ffi::CString;
@@ -160,11 +161,18 @@ extern "C" {
         height: u32,
         flags: u32,
         scale: i32,
+        view_handle: *mut *const c_void,
     ) -> *mut c_void;
     fn mfb_set_title(window: *mut c_void, title: *const c_char);
     fn mfb_close(window: *mut c_void);
     fn mfb_update(window: *mut c_void);
-    fn mfb_update_with_buffer(window: *mut c_void, buffer: *const c_uchar);
+    fn mfb_update_with_buffer(
+        window: *mut c_void,
+        buffer: *const c_uchar,
+        buf_width: u32,
+        buf_height: u32,
+        buf_stride: u32,
+    );
     fn mfb_set_position(window: *mut c_void, x: i32, y: i32);
     fn mfb_set_key_callback(
         window: *mut c_void,
@@ -174,6 +182,7 @@ extern "C" {
     );
     fn mfb_set_mouse_data(window_handle: *mut c_void, shared_data: *mut SharedData);
     fn mfb_set_cursor_style(window: *mut c_void, cursor: u32);
+    fn mfb_set_cursor_visibility(window: *mut c_void, visibility: bool);
     fn mfb_should_close(window: *mut c_void) -> i32;
     fn mfb_get_screen_size() -> u32;
     fn mfb_is_active(window: *mut c_void) -> u32;
@@ -183,6 +192,9 @@ extern "C" {
 
     fn mfb_create_menu(name: *const c_char) -> *mut c_void;
     fn mfb_remove_menu_at(window: *mut c_void, index: i32);
+
+    /// Sets the whether or not the window is the topmost window
+    fn mfb_topmost(window: *mut c_void, topmost: bool);
 
     fn mfb_add_menu_item(
         menu_item: *mut c_void,
@@ -198,6 +210,8 @@ extern "C" {
 #[derive(Default)]
 #[repr(C)]
 pub struct SharedData {
+    pub bg_color: u32,
+    pub scale_mode: u32,
     pub width: u32,
     pub height: u32,
     pub mouse_x: f32,
@@ -209,9 +223,11 @@ pub struct SharedData {
 
 pub struct Window {
     window_handle: *mut c_void,
+    view_handle: *const c_void,
     scale_factor: usize,
     pub shared_data: SharedData,
     key_handler: KeyHandler,
+    update_rate: UpdateRate,
     pub has_set_data: bool,
     menus: Vec<MenuHandle>,
 }
@@ -243,6 +259,17 @@ unsafe extern "C" fn char_callback(window: *mut c_void, code_point: u32) {
     }
 }
 
+unsafe impl raw_window_handle::HasRawWindowHandle for Window {
+    fn raw_window_handle(&self) -> raw_window_handle::RawWindowHandle {
+        let handle = raw_window_handle::macos::MacOSHandle {
+            ns_window: self.window_handle as *mut _,
+            ns_view: self.view_handle as *mut _,
+            ..raw_window_handle::macos::MacOSHandle::empty()
+        };
+        raw_window_handle::RawWindowHandle::MacOS(handle)
+    }
+}
+
 impl Window {
     pub fn new(name: &str, width: usize, height: usize, opts: WindowOptions) -> Result<Window> {
         let n = match CString::new(name) {
@@ -255,13 +282,19 @@ impl Window {
 
         unsafe {
             let scale_factor = Self::get_scale_factor(width, height, opts.scale) as usize;
+            let mut view_handle = ptr::null();
             let handle = mfb_open(
                 n.as_ptr(),
                 width as u32,
                 height as u32,
                 window_flags::get_flags(opts),
                 scale_factor as i32,
+                &mut view_handle,
             );
+
+            if opts.topmost {
+                mfb_topmost(handle, true);
+            }
 
             if handle == ptr::null_mut() {
                 return Err(Error::WindowCreate("Unable to open Window".to_owned()));
@@ -269,13 +302,17 @@ impl Window {
 
             Ok(Window {
                 window_handle: handle,
-                scale_factor: scale_factor,
+                view_handle,
+                scale_factor,
                 shared_data: SharedData {
+                    bg_color: 0,
+                    scale_mode: opts.scale_mode as u32,
                     width: width as u32 * scale_factor as u32,
                     height: height as u32 * scale_factor as u32,
                     ..SharedData::default()
                 },
                 key_handler: KeyHandler::new(),
+                update_rate: UpdateRate::new(),
                 has_set_data: false,
                 menus: Vec::new(),
             })
@@ -291,6 +328,16 @@ impl Window {
     }
 
     #[inline]
+    pub fn set_rate(&mut self, rate: Option<std::time::Duration>) {
+        self.update_rate.set_rate(rate);
+    }
+
+    #[inline]
+    pub fn update_rate(&mut self) {
+        self.update_rate.update();
+    }
+
+    #[inline]
     pub fn get_window_handle(&self) -> *mut raw::c_void {
         self.window_handle as *mut raw::c_void
     }
@@ -300,21 +347,37 @@ impl Window {
         mfb_set_mouse_data(self.window_handle, &mut self.shared_data);
     }
 
-    pub fn update_with_buffer(&mut self, buffer: &[u32]) -> Result<()> {
+    #[inline]
+    pub fn set_background_color(&mut self, color: u32) {
+        self.shared_data.bg_color = color;
+    }
+
+    #[inline]
+    pub fn set_cursor_visibility(&mut self, visibility: bool) {
+        unsafe {
+            mfb_set_cursor_visibility(self.window_handle, visibility);
+        }
+    }
+
+    pub fn update_with_buffer_stride(
+        &mut self,
+        buffer: &[u32],
+        buf_width: usize,
+        buf_height: usize,
+        buf_stride: usize,
+    ) -> Result<()> {
         self.key_handler.update();
 
-        let check_res = buffer_helper::check_buffer_size(
-            self.shared_data.width as usize,
-            self.shared_data.height as usize,
-            self.scale_factor as usize,
-            buffer,
-        );
-        if check_res.is_err() {
-            return check_res;
-        }
+        buffer_helper::check_buffer_size(buf_width, buf_height, buf_stride, buffer)?;
 
         unsafe {
-            mfb_update_with_buffer(self.window_handle, buffer.as_ptr() as *const u8);
+            mfb_update_with_buffer(
+                self.window_handle,
+                buffer.as_ptr() as *const u8,
+                buf_width as u32,
+                buf_height as u32,
+                buf_stride as u32,
+            );
             Self::set_mouse_data(self);
             mfb_set_key_callback(
                 self.window_handle,
@@ -345,6 +408,11 @@ impl Window {
     #[inline]
     pub fn set_position(&mut self, x: isize, y: isize) {
         unsafe { mfb_set_position(self.window_handle, x as i32, y as i32) }
+    }
+
+    #[inline]
+    pub fn topmost(&self, topmost: bool) {
+        unsafe { mfb_topmost(self.window_handle, topmost) }
     }
 
     pub fn get_size(&self) -> (usize, usize) {
@@ -421,6 +489,11 @@ impl Window {
     }
 
     #[inline]
+    pub fn get_keys_released(&self) -> Option<Vec<Key>> {
+        self.key_handler.get_keys_released()
+    }
+
+    #[inline]
     pub fn is_key_down(&self, key: Key) -> bool {
         self.key_handler.is_key_down(key)
     }
@@ -446,7 +519,7 @@ impl Window {
     }
 
     #[inline]
-    pub fn set_input_callback(&mut self, callback: Box<InputCallback>) {
+    pub fn set_input_callback(&mut self, callback: Box<dyn InputCallback>) {
         self.key_handler.set_input_callback(callback)
     }
 

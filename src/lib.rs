@@ -91,6 +91,7 @@ pub trait InputCallback {
 mod error;
 pub use self::error::Error;
 pub type Result<T> = std::result::Result<T, Error>;
+pub use raw_window_handle::HasRawWindowHandle;
 
 mod key;
 pub use key::Key;
@@ -98,19 +99,11 @@ mod buffer_helper;
 mod key_handler;
 mod mouse_handler;
 mod os;
+mod rate;
 mod window_flags;
-//mod menu;
-//pub use menu::Menu as Menu;
-//pub use menu::MENU_KEY_COMMAND;
-//pub use menu::MENU_KEY_WIN;
-//pub use menu::MENU_KEY_SHIFT;
-//pub use menu::MENU_KEY_CTRL;
-//pub use menu::MENU_KEY_ALT;
 
 #[cfg(target_os = "macos")]
 use self::os::macos as imp;
-#[cfg(target_os = "redox")]
-use self::os::redox as imp;
 #[cfg(any(
     target_os = "linux",
     target_os = "freebsd",
@@ -118,7 +111,9 @@ use self::os::redox as imp;
     target_os = "netbsd",
     target_os = "openbsd"
 ))]
-use self::os::unix as imp;
+use self::os::posix as imp;
+#[cfg(target_os = "redox")]
+use self::os::redox as imp;
 #[cfg(target_os = "windows")]
 use self::os::windows as imp;
 ///
@@ -131,6 +126,40 @@ impl fmt::Debug for Window {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Window").field(&format_args!("..")).finish()
     }
+}
+
+unsafe impl raw_window_handle::HasRawWindowHandle for Window {
+    fn raw_window_handle(&self) -> raw_window_handle::RawWindowHandle {
+        self.0.raw_window_handle()
+    }
+}
+
+pub fn clamp<T: PartialOrd>(low: T, value: T, high: T) -> T {
+    if value < low {
+        low
+    } else if value > high {
+        high
+    } else {
+        value
+    }
+}
+
+///
+/// On some OS (X11 for example) it's possible a window can resize even if no resize has been set.
+/// This causes some issues depending on how the content of an input buffer should be displayed then it's possible
+/// to set this scaling mode to get a better behavior.
+///
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ScaleMode {
+    /// Stretch the buffer in the whole window meaning if your buffer is 256x256 and window is 1024x1024 it will be scaled up 4 times
+    Stretch,
+    /// Keep the correct aspect ratio to be displayed while scaling up fully in the other axis. Fill area will be filed with Window::set_bg_color (default 0, 0, 0)
+    AspectRatioStretch,
+    /// Places the buffer in the middle of the window without any scaling. Fills the borders with color set `Window::set_background_color` (default 0, 0, 0)
+    /// If the window is smaller than the buffer the center of the buffer will be displayed
+    Center,
+    /// Same as Center but places the buffer in the upper left corner of the window.
+    UpperLeft,
 }
 
 ///
@@ -147,6 +176,14 @@ pub struct WindowOptions {
     pub resize: bool,
     /// Scale of the window that used in conjunction with update_with_buffer (default: X1)
     pub scale: Scale,
+    /// Adjust how the scaling of the buffer used with update_with_buffer should be done.
+    pub scale_mode: ScaleMode,
+    /// Should the window be the topmost window (default: false)
+    pub topmost: bool,
+    /// Specifies whether or not the window is allowed to draw transparent pixels (default: false)
+    /// Requires borderless to be 'true'
+    /// TODO: Currently not implemented on Windows and OSX
+    pub transparency: bool,
 }
 
 impl Window {
@@ -172,19 +209,19 @@ impl Window {
     ///
     /// ```no_run
     /// # use minifb::*;
-    /// let mut window = match Window::new("Test", 640, 400,
-    ///                                     WindowOptions {
-    ///                                         resize: true,
-    ///                                         ..WindowOptions::default()
-    ///                                     }) {
-    ///    Ok(win) => win,
-    ///    Err(err) => {
-    ///        println!("Unable to create window {}", err);
-    ///        return;
-    ///    }
-    ///};
+    /// let mut window = Window::new("Test", 640, 400,
+    ///     WindowOptions {
+    ///        resize: true,
+    ///        ..WindowOptions::default()
+    ///  })
+    ///  .expect("Unable to open Window");
     /// ```
     pub fn new(name: &str, width: usize, height: usize, opts: WindowOptions) -> Result<Window> {
+        if opts.transparency && !opts.borderless {
+            return Err(Error::WindowCreate(
+                "Window transparency requires the borderless property".to_owned(),
+            ));
+        }
         imp::Window::new(name, width, height, opts).map(Window)
     }
 
@@ -234,17 +271,29 @@ impl Window {
     ///     let (r, g, b) = (r as u32, g as u32, b as u32);
     ///     (r << 16) | (g << 8) | b
     /// }
+    /// let window_width = 600;
+    /// let window_height = 400;
+    /// let buffer_width = 600;
+    /// let buffer_height = 400;
+    ///
     /// let azure_blue = from_u8_rgb(0, 127, 255);
     ///
-    /// let mut buffer: Vec<u32> = vec![azure_blue; 640 * 400];
+    /// let mut buffer: Vec<u32> = vec![azure_blue; buffer_width * buffer_height];
     ///
-    /// let mut window = Window::new("Test", 640, 400, WindowOptions::default()).unwrap();
+    /// let mut window = Window::new("Test", window_width, window_height, WindowOptions::default()).unwrap();
     ///
-    /// window.update_with_buffer(&buffer).unwrap();
+    /// window.update_with_buffer(&buffer, buffer_width, buffer_height).unwrap();
     /// ```
     #[inline]
-    pub fn update_with_buffer(&mut self, buffer: &[u32]) -> Result<()> {
-        self.0.update_with_buffer(buffer)
+    pub fn update_with_buffer(
+        &mut self,
+        buffer: &[u32],
+        width: usize,
+        height: usize,
+    ) -> Result<()> {
+        self.0.update_rate();
+        self.0
+            .update_with_buffer_stride(buffer, width, height, width)
     }
 
     ///
@@ -262,6 +311,7 @@ impl Window {
     /// ```
     #[inline]
     pub fn update(&mut self) {
+        self.0.update_rate();
         self.0.update()
     }
 
@@ -300,6 +350,87 @@ impl Window {
     #[inline]
     pub fn set_position(&mut self, x: isize, y: isize) {
         self.0.set_position(x, y)
+    }
+
+    ///
+    /// Makes the window the topmost window and makes it stay always on top. This is useful if you
+    /// want the window to float above all over windows
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use minifb::*;
+    /// # let mut window = Window::new("Test", 640, 400, WindowOptions::default()).unwrap();
+    /// // Makes the window always on top
+    /// window.topmost(true);
+    /// ```
+    ///
+    #[inline]
+    pub fn topmost(&self, topmost: bool) {
+        self.0.topmost(topmost)
+    }
+
+    ///
+    /// Sets the background color that is used with update_with_buffer.
+    /// In some cases there will be a blank area around the buffer depending on the ScaleMode that has been set.
+    /// This color will be used in the in that area.
+    /// The function takes 3 parameters in (red, green, blue) and each value is in the range of 0-255 where 255 is the brightest value
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use minifb::*;
+    /// # let mut window = Window::new("Test", 640, 400, WindowOptions::default()).unwrap();
+    /// // Set background color to bright red
+    /// window.set_background_color(255, 0, 0);
+    /// ```
+    ///
+    #[inline]
+    pub fn set_background_color(&mut self, red: usize, green: usize, blue: usize) {
+        let r = clamp(0, red, 255);
+        let g = clamp(0, green, 255);
+        let b = clamp(0, blue, 255);
+        self.0
+            .set_background_color(((r << 16) | (g << 8) | b) as u32);
+    }
+
+    ///
+    /// Changes whether or not the cursor image should be shown or if the cursor image
+    /// should be invisible inside the window
+    /// When creating a new window the default is 'false'
+    #[inline]
+    pub fn set_cursor_visibility(&mut self, visibility: bool) {
+        self.0.set_cursor_visibility(visibility);
+    }
+
+    ///
+    /// Limits the update rate of polling for new events in order to reduce CPU usage.
+    /// The problem of having a tight loop that does something like this
+    ///
+    /// ```no_run
+    /// # use minifb::*;
+    /// # let mut window = Window::new("Test", 640, 400, WindowOptions::default()).unwrap();
+    /// loop {
+    ///    window.update();
+    /// }
+    /// ```
+    /// Is that lots of CPU time will be spent calling system functions to check for new events in a tight loop making the CPU time go up.
+    /// Using `limit_update_rate` minifb will check how much time has passed since the last time and if it's less than the selected time it will sleep for the remainder of it.
+    /// This means that if more time has spent than the set time (external code taking longer) minifb will not do any waiting at all so there is no loss in CPU performance with this feature.
+    /// By default it's set to 4 milliseconds. Setting this value to None and no waiting will be done
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use minifb::*;
+    /// # let mut window = Window::new("Test", 640, 400, WindowOptions::default()).unwrap();
+    /// // Make sure that at least 4 ms has passed since the last event poll
+    /// window.limit_update_rate(Some(std::time::Duration::from_millis(4)));
+    /// ```
+    ///
+    #[inline]
+    pub fn limit_update_rate(&mut self, time: Option<std::time::Duration>) {
+        self.0.set_rate(time)
     }
 
     ///
@@ -462,6 +593,29 @@ impl Window {
     }
 
     ///
+    /// Get the current released keys.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use minifb::*;
+    /// # let mut window = Window::new("Test", 640, 400, WindowOptions::default()).unwrap();
+    /// window.get_keys_released().map(|keys| {
+    ///     for t in keys {
+    ///         match t {
+    ///             Key::W => println!("released w"),
+    ///             Key::T => println!("released t"),
+    ///             _ => (),
+    ///         }
+    ///     }
+    /// });
+    /// ```
+    #[inline]
+    pub fn get_keys_released(&self) -> Option<Vec<Key>> {
+        self.0.get_keys_released()
+    }
+
+    ///
     /// Check if a single key is down.
     ///
     /// # Examples
@@ -568,7 +722,7 @@ impl Window {
     ///   on which window you have active.
     /// Linux/BSD/etc:
     ///   Menus aren't supported as they depend on each WindowManager and is outside of the
-    ///   scope for this library to support. Use [get_unix_menus] to get a structure
+    ///   scope for this library to support. Use [get_posix_menus] to get a structure
     /// ```
     ///
     #[inline]
@@ -585,11 +739,11 @@ impl Window {
     }
 
     ///
-    /// Get Unix menu. Will only return menus on Unix class OSes
+    /// Get POSIX menus. Will only return menus on POSIX-like OSes like Linux or BSD
     /// otherwise ```None```
     ///
     #[cfg(any(target_os = "macos", target_os = "windows"))]
-    pub fn get_unix_menus(&self) -> Option<&Vec<UnixMenu>> {
+    pub fn get_posix_menus(&self) -> Option<&Vec<UnixMenu>> {
         None
     }
 
@@ -601,8 +755,16 @@ impl Window {
         target_os = "openbsd",
         target_os = "redox"
     ))]
+    pub fn get_posix_menus(&self) -> Option<&Vec<UnixMenu>> {
+        self.0.get_posix_menus()
+    }
+
+    #[deprecated(
+        since = "0.17.0",
+        note = "`get_unix_menus` will be removed in 1.0.0, use `get_posix_menus` instead"
+    )]
     pub fn get_unix_menus(&self) -> Option<&Vec<UnixMenu>> {
-        self.0.get_unix_menus()
+        self.get_posix_menus()
     }
 
     ///
@@ -628,8 +790,11 @@ pub const MENU_KEY_ALT: usize = 16;
 const MENU_ID_SEPARATOR: usize = 0xffffffff;
 
 ///
-/// Used on Unix (Linux, FreeBSD, etc) as menus aren't supported in a native where there.
-/// This structure can be used by calling [#get_unix_menus] on Window.
+/// Used on POSIX systems (Linux, FreeBSD, etc) as menus aren't supported in a native way there.
+/// This structure can be used by calling [#get_posix_menus] on Window.
+///
+/// In version 1.0.0, this struct will be renamed to PosixMenu, but it remains UnixMenu for backwards compatibility
+/// reasons.
 ///
 #[derive(Debug, Clone)]
 pub struct UnixMenu {
@@ -644,7 +809,7 @@ pub struct UnixMenu {
 }
 
 ///
-/// Used for on Unix (Linux, FreeBSD, etc) as menus aren't supported in a native where there.
+/// Used on POSIX systems (Linux, FreeBSD, etc) as menus aren't supported in a native way there.
 /// This structure holds info for each item in a #UnixMenu
 ///
 #[derive(Debug, Clone)]
@@ -728,7 +893,7 @@ impl Menu {
     /// ```
     pub fn add_item(&mut self, name: &str, id: usize) -> MenuItem {
         MenuItem {
-            id: id,
+            id,
             label: name.to_owned(),
             menu: Some(self),
             ..MenuItem::default()
@@ -786,7 +951,7 @@ impl<'a> MenuItem<'a> {
     /// Creates a new menu item
     pub fn new(name: &str, id: usize) -> MenuItem {
         MenuItem {
-            id: id,
+            id,
             label: name.to_owned(),
             ..MenuItem::default()
         }
@@ -804,8 +969,8 @@ impl<'a> MenuItem<'a> {
     /// ```
     pub fn shortcut(self, key: Key, modifier: usize) -> Self {
         MenuItem {
-            key: key,
-            modifier: modifier,
+            key,
+            modifier,
             ..self
         }
     }
@@ -839,10 +1004,7 @@ impl<'a> MenuItem<'a> {
     /// # ;
     /// ```
     pub fn enabled(self, enabled: bool) -> Self {
-        MenuItem {
-            enabled: enabled,
-            ..self
-        }
+        MenuItem { enabled, ..self }
     }
     #[inline]
     /// Must be called to finalize building of a menu item when started with ```menu.add_item()```
@@ -871,9 +1033,12 @@ impl Default for WindowOptions {
     fn default() -> WindowOptions {
         WindowOptions {
             borderless: false,
+            transparency: false,
             title: true,
             resize: false,
             scale: Scale::X1,
+            scale_mode: ScaleMode::Stretch,
+            topmost: false,
         }
     }
 }

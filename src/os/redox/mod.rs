@@ -1,18 +1,17 @@
 #![cfg(target_os = "redox")]
 
-extern crate orbclient;
-use os::redox::orbclient::Renderer;
+use crate::os::redox::orbclient::Renderer;
 
-use buffer_helper;
-use error::Error;
-use key_handler::KeyHandler;
-use mouse_handler;
-use InputCallback;
-use Result;
-use {CursorStyle, MouseButton, MouseMode};
-use {Key, KeyRepeat};
-use {MenuHandle, MenuItem, MenuItemHandle, UnixMenu, UnixMenuItem};
-use {Scale, WindowOptions};
+use crate::buffer_helper;
+use crate::error::Error;
+use crate::key_handler::KeyHandler;
+use crate::mouse_handler;
+use crate::InputCallback;
+use crate::Result;
+use crate::{CursorStyle, MouseButton, MouseMode};
+use crate::{Key, KeyRepeat};
+use crate::{MenuHandle, MenuItem, MenuItemHandle, UnixMenu, UnixMenuItem};
+use crate::{Scale, WindowOptions};
 
 use std::cmp;
 use std::os::raw;
@@ -68,6 +67,9 @@ impl Window {
         if !opts.title {
             window_flags.push(orbclient::WindowFlag::Borderless);
         }
+        if opts.transparency {
+            window_flags.push(orbclient::WindowFlag::Transparent);
+        }
 
         let window_opt =
             orbclient::Window::new_flags(-1, -1, window_width, window_height, name, &window_flags);
@@ -80,8 +82,8 @@ impl Window {
                 is_active: true,
                 buffer_width: width,
                 buffer_height: height,
-                window: window,
-                window_scale: window_scale,
+                window,
+                window_scale,
                 key_handler: KeyHandler::new(),
                 menu_counter: MenuHandle(0),
                 menus: Vec::new(),
@@ -182,12 +184,20 @@ impl Window {
         // Orbital doesn't support cursor styles yet
     }
 
+    pub fn set_cursor_visibility(&mut self, visibility: bool) {
+        self.window.set_mouse_cursor(visibility);
+    }
+
     pub fn get_keys(&self) -> Option<Vec<Key>> {
         self.key_handler.get_keys()
     }
 
     pub fn get_keys_pressed(&self, repeat: KeyRepeat) -> Option<Vec<Key>> {
         self.key_handler.get_keys_pressed(repeat)
+    }
+
+    pub fn get_keys_released(&self) -> Option<Vec<Key>> {
+        self.key_handler.get_keys_released()
     }
 
     pub fn is_key_down(&self, key: Key) -> bool {
@@ -383,7 +393,7 @@ impl Window {
         handle
     }
 
-    pub fn get_unix_menus(&self) -> Option<&Vec<UnixMenu>> {
+    pub fn get_posix_menus(&self) -> Option<&Vec<UnixMenu>> {
         Some(&self.menus)
     }
 
@@ -416,7 +426,7 @@ impl Menu {
         let handle = self.next_item_handle();
         self.internal.items.push(UnixMenuItem {
             label: name.to_owned(),
-            handle: handle,
+            handle,
             sub_menu: Some(Box::new(sub_menu.internal.clone())),
             id: 0,
             enabled: true,
